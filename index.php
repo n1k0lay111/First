@@ -159,7 +159,7 @@ const canvas  = document.getElementById('c');
 const ctx     = canvas.getContext('2d');
 
 const SIZE = Math.min(400, window.innerWidth - 16);
-const COLS = 20;
+const COLS = 10;
 const CELL = Math.floor(SIZE / COLS);
 const W    = COLS * CELL;
 canvas.width = canvas.height = W;
