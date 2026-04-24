@@ -235,7 +235,7 @@ function placeFood() {
 }
 
 function startGame() {
-    snake   = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+    snake   = [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }];
     dir     = { x: 1, y: 0 };
     nextDir = { x: 1, y: 0 };
     score   = 0; speed = 130;
