@@ -2,83 +2,341 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Моя страница</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Летящая птица</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f0f4f8;
-            color: #333;
+            background: #000;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            touch-action: none;
         }
-
-        .container {
-            background-color: #fff;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            padding: 40px;
-            max-width: 600px;
-            width: 90%;
-            text-align: center;
-        }
-
-        h1 {
-            font-size: 2rem;
-            color: #2c3e50;
-            margin-bottom: 16px;
-        }
-
-        p {
-            font-size: 1rem;
-            color: #666;
-            line-height: 1.6;
-            margin-bottom: 24px;
-        }
-
-        button {
-            background-color: #3498db;
-            color: #fff;
-            border: none;
-            padding: 12px 28px;
-            font-size: 1rem;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        button:hover {
-            background-color: #2980b9;
-        }
-
-        #message {
-            margin-top: 20px;
-            font-size: 1rem;
-            color: #27ae60;
-            min-height: 24px;
-        }
+        canvas { display: block; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Привет, мир!</h1>
-        <p>Это простая HTML-страница с базовыми стилями и интерактивной кнопкой.</p>
-        <button onclick="showMessage()">Нажми меня</button>
-        <div id="message"></div>
-    </div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
 
-    <script>
-        function showMessage() {
-            document.getElementById('message').textContent = 'Привет! Кнопка работает!';
+const W = canvas.width  = Math.min(420, window.innerWidth);
+const H = canvas.height = Math.min(680, window.innerHeight);
+
+const GRAVITY    = 0.45;
+const FLAP_POWER = -9;
+const PIPE_W     = 62;
+const GAP        = 170;
+const PIPE_SPEED = 2.8;
+const BIRD_R     = 18;
+const GROUND_H   = 70;
+
+let bird, pipes, score, best, state, pipeTimer, particles;
+
+function init() {
+    bird      = { x: W * 0.25, y: H / 2, vy: 0, angle: 0 };
+    pipes     = [];
+    score     = 0;
+    best      = best || 0;
+    state     = 'start';
+    pipeTimer = 0;
+    particles = [];
+}
+
+function flap() {
+    if (state === 'start' || state === 'dead') {
+        init();
+        state = 'playing';
+    } else if (state === 'playing') {
+        bird.vy = FLAP_POWER;
+        spawnParticles(bird.x, bird.y, '#fff', 5);
+    }
+}
+
+document.addEventListener('touchstart', e => { e.preventDefault(); flap(); }, { passive: false });
+document.addEventListener('mousedown', flap);
+document.addEventListener('keydown', e => { if (e.code === 'Space' || e.code === 'ArrowUp') flap(); });
+
+function spawnPipe() {
+    const minTop = 60;
+    const maxTop = H - GROUND_H - GAP - 60;
+    const topH   = minTop + Math.random() * (maxTop - minTop);
+    pipes.push({ x: W + 10, topH, scored: false });
+}
+
+function spawnParticles(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+        particles.push({
+            x, y,
+            vx: (Math.random() - 0.5) * 4,
+            vy: (Math.random() - 0.5) * 4,
+            alpha: 1,
+            color,
+            r: 3 + Math.random() * 3
+        });
+    }
+}
+
+function update() {
+    // Particles
+    particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        p.alpha -= 0.05;
+    });
+    particles = particles.filter(p => p.alpha > 0);
+
+    if (state !== 'playing') return;
+
+    bird.vy += GRAVITY;
+    bird.y  += bird.vy;
+    bird.angle = Math.min(Math.PI * 0.4, Math.max(-Math.PI * 0.3, bird.vy * 0.055));
+
+    // Spawn pipes
+    pipeTimer++;
+    if (pipeTimer > 105) { spawnPipe(); pipeTimer = 0; }
+
+    pipes.forEach(p => {
+        p.x -= PIPE_SPEED;
+        if (!p.scored && p.x + PIPE_W < bird.x) {
+            p.scored = true;
+            score++;
+            if (score > best) best = score;
+            spawnParticles(bird.x, bird.y, '#FFD700', 8);
         }
-    </script>
+    });
+    pipes = pipes.filter(p => p.x + PIPE_W > 0);
+
+    // Boundaries
+    if (bird.y + BIRD_R > H - GROUND_H || bird.y - BIRD_R < 0) {
+        die();
+        return;
+    }
+
+    // Pipe collision
+    for (const p of pipes) {
+        if (bird.x + BIRD_R - 4 > p.x && bird.x - BIRD_R + 4 < p.x + PIPE_W) {
+            if (bird.y - BIRD_R < p.topH || bird.y + BIRD_R > p.topH + GAP) {
+                die();
+                return;
+            }
+        }
+    }
+}
+
+function die() {
+    spawnParticles(bird.x, bird.y, '#FF4444', 20);
+    state = 'dead';
+}
+
+/* ── Draw helpers ── */
+
+function drawCloud(x, y, s) {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.arc(x,        y,      s * 0.9, 0, Math.PI * 2);
+    ctx.arc(x + s,    y - s * 0.3, s * 0.75, 0, Math.PI * 2);
+    ctx.arc(x + s * 2, y,    s * 0.9, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawPipe(x, topH) {
+    const capH = 28, capExtra = 8;
+
+    // Top pipe body
+    const g1 = ctx.createLinearGradient(x, 0, x + PIPE_W, 0);
+    g1.addColorStop(0,   '#3ecf5b');
+    g1.addColorStop(0.45,'#2ecc71');
+    g1.addColorStop(1,   '#1a7a40');
+    ctx.fillStyle = g1;
+    ctx.fillRect(x, 0, PIPE_W, topH - capH);
+
+    // Top pipe cap
+    const g2 = ctx.createLinearGradient(x - capExtra, 0, x + PIPE_W + capExtra, 0);
+    g2.addColorStop(0,   '#4ade80');
+    g2.addColorStop(0.5, '#22c55e');
+    g2.addColorStop(1,   '#15803d');
+    ctx.fillStyle = g2;
+    ctx.beginPath();
+    ctx.roundRect(x - capExtra, topH - capH, PIPE_W + capExtra * 2, capH, [0, 0, 4, 4]);
+    ctx.fill();
+
+    const botY = topH + GAP;
+
+    // Bottom cap
+    ctx.fillStyle = g2;
+    ctx.beginPath();
+    ctx.roundRect(x - capExtra, botY, PIPE_W + capExtra * 2, capH, [4, 4, 0, 0]);
+    ctx.fill();
+
+    // Bottom body
+    ctx.fillStyle = g1;
+    ctx.fillRect(x, botY + capH, PIPE_W, H - botY - capH);
+}
+
+function drawBird() {
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.angle);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(3, BIRD_R + 4, BIRD_R * 0.9, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    const bg = ctx.createRadialGradient(-4, -4, 2, 0, 0, BIRD_R);
+    bg.addColorStop(0, '#FFE55C');
+    bg.addColorStop(1, '#FF9A00');
+    ctx.fillStyle = bg;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, BIRD_R, BIRD_R * 0.85, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Wing
+    ctx.fillStyle = '#FFA500';
+    ctx.beginPath();
+    ctx.ellipse(-4, 5, 11, 6, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye white
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(8, -5, 7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pupil
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(10, -5, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shine
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(9, -7, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Beak
+    ctx.fillStyle = '#FF5500';
+    ctx.beginPath();
+    ctx.moveTo(BIRD_R - 2, -3);
+    ctx.lineTo(BIRD_R + 11, 0);
+    ctx.lineTo(BIRD_R - 2,  4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+}
+
+function drawGround() {
+    // Dirt
+    ctx.fillStyle = '#A0622A';
+    ctx.fillRect(0, H - GROUND_H, W, GROUND_H);
+    // Grass
+    ctx.fillStyle = '#5DBB1F';
+    ctx.fillRect(0, H - GROUND_H, W, 18);
+    // Grass bumps
+    ctx.fillStyle = '#4CAA10';
+    for (let x = 0; x < W; x += 22) {
+        ctx.beginPath();
+        ctx.arc(x + 11, H - GROUND_H + 4, 9, Math.PI, 0);
+        ctx.fill();
+    }
+}
+
+function drawText(text, x, y, size, color = '#fff', stroke = true) {
+    ctx.font = `bold ${size}px Arial`;
+    ctx.textAlign = 'center';
+    if (stroke) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = size * 0.18;
+        ctx.strokeText(text, x, y);
+    }
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+}
+
+function draw() {
+    // Sky
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0,   '#4FC3F7');
+    sky.addColorStop(0.6, '#B3E5FC');
+    sky.addColorStop(1,   '#E1F5FE');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // Clouds
+    drawCloud(30,  80,  22);
+    drawCloud(180, 55,  18);
+    drawCloud(310, 100, 25);
+
+    // Pipes
+    pipes.forEach(p => drawPipe(p.x, p.topH));
+
+    // Particles
+    particles.forEach(p => {
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    drawGround();
+    drawBird();
+
+    // Score during play
+    if (state === 'playing') {
+        drawText(score, W / 2, 75, W * 0.13);
+    }
+
+    // ── Start screen ──
+    if (state === 'start') {
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.beginPath();
+        ctx.roundRect(W / 2 - 155, H / 2 - 120, 310, 240, 20);
+        ctx.fill();
+
+        drawText('🐦 Летящая птица', W / 2, H / 2 - 60, W * 0.08);
+        drawText('Тапни чтобы начать', W / 2, H / 2,      W * 0.055, '#FFE082');
+        drawText('Тап = прыжок',        W / 2, H / 2 + 50, W * 0.048);
+        drawText('Лучший: ' + best,      W / 2, H / 2 + 95, W * 0.048, '#80DEEA');
+    }
+
+    // ── Game over screen ──
+    if (state === 'dead') {
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.beginPath();
+        ctx.roundRect(W / 2 - 155, H / 2 - 130, 310, 260, 20);
+        ctx.fill();
+
+        drawText('Игра окончена!', W / 2, H / 2 - 70, W * 0.08,  '#FF8A80');
+        drawText('Счёт: '  + score, W / 2, H / 2 - 15, W * 0.09);
+        drawText('Рекорд: ' + best,  W / 2, H / 2 + 45, W * 0.055, '#FFD54F');
+        drawText('Тапни для рестарта', W / 2, H / 2 + 100, W * 0.05, '#B0BEC5');
+    }
+}
+
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+init();
+loop();
+</script>
 </body>
 </html>
