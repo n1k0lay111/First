@@ -3,340 +3,322 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Летящая птица</title>
+    <title>Змейка</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: #000;
+            background: #1a1a2e;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
+            justify-content: center;
             height: 100dvh;
+            font-family: Arial, sans-serif;
             overflow: hidden;
             touch-action: none;
         }
-        canvas { display: block; }
+        #header {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 400px;
+            padding: 0 8px 10px;
+            color: #fff;
+        }
+        .stat { text-align: center; }
+        .stat-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-value { font-size: 26px; font-weight: bold; color: #00e676; }
+        #best-value { color: #ffd740; }
+        canvas {
+            border-radius: 12px;
+            display: block;
+        }
+        #overlay {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            background: rgba(0,0,0,0.72);
+            border-radius: 20px;
+            padding: 36px 40px;
+            color: #fff;
+            text-align: center;
+        }
+        #overlay h1 { font-size: 28px; }
+        #overlay .sub { font-size: 15px; color: #aaa; }
+        #overlay .hint { font-size: 13px; color: #666; }
+        #overlay .score-display { font-size: 42px; font-weight: bold; color: #00e676; }
+        #overlay .best-display { font-size: 16px; color: #ffd740; }
+        #btn {
+            margin-top: 6px;
+            padding: 14px 36px;
+            background: #00e676;
+            color: #1a1a2e;
+            border: none;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            letter-spacing: 0.5px;
+        }
+        #btn:active { transform: scale(0.96); }
+        #swipe-hint {
+            position: absolute;
+            bottom: 24px;
+            color: #444;
+            font-size: 13px;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
-<canvas id="c"></canvas>
+
+<div id="header">
+    <div class="stat">
+        <div class="stat-label">Счёт</div>
+        <div class="stat-value" id="score-val">0</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">Рекорд</div>
+        <div class="stat-value" id="best-value">0</div>
+    </div>
+</div>
+
+<div style="position:relative; display:inline-block;">
+    <canvas id="c"></canvas>
+    <div id="overlay">
+        <h1>🐍 Змейка</h1>
+        <div class="sub">Собирай еду, не врезайся!</div>
+        <div class="hint">Свайп — управление<br>Стрелки / WASD — с клавиатуры</div>
+        <button id="btn" onclick="startGame()">Начать игру</button>
+    </div>
+</div>
+
+<div id="swipe-hint">Свайп для управления</div>
+
 <script>
 const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
+const ctx    = canvas.getContext('2d');
 
-const W = canvas.width  = Math.min(420, window.innerWidth);
-const H = canvas.height = Math.min(680, window.innerHeight);
+const SIZE    = Math.min(400, window.innerWidth - 16);
+const COLS    = 20;
+const CELL    = Math.floor(SIZE / COLS);
+const W       = COLS * CELL;
+canvas.width  = W;
+canvas.height = W;
 
-const GRAVITY    = 0.45;
-const FLAP_POWER = -9;
-const PIPE_W     = 62;
-const GAP        = 170;
-const PIPE_SPEED = 2.8;
-const BIRD_R     = 18;
-const GROUND_H   = 70;
+const overlay   = document.getElementById('overlay');
+const scoreEl   = document.getElementById('score-val');
+const bestEl    = document.getElementById('best-value');
 
-let bird, pipes, score, best, state, pipeTimer, particles;
+let snake, dir, nextDir, food, score, best, running, interval, speed;
+best = 0;
 
-function init() {
-    bird      = { x: W * 0.25, y: H / 2, vy: 0, angle: 0 };
-    pipes     = [];
-    score     = 0;
-    best      = best || 0;
-    state     = 'start';
-    pipeTimer = 0;
-    particles = [];
+const COLORS = {
+    bg:      '#16213e',
+    grid:    '#0f3460',
+    head:    '#00e676',
+    body:    '#00c853',
+    tail:    '#69f0ae',
+    food:    '#ff5252',
+    foodGlow:'rgba(255,82,82,0.3)',
+    eye:     '#fff',
+    pupil:   '#1a1a2e',
+};
+
+function rand(max) { return Math.floor(Math.random() * max); }
+
+function placeFood() {
+    let pos;
+    do {
+        pos = { x: rand(COLS), y: rand(COLS) };
+    } while (snake.some(s => s.x === pos.x && s.y === pos.y));
+    food = pos;
 }
 
-function flap() {
-    if (state === 'start' || state === 'dead') {
-        init();
-        state = 'playing';
-    } else if (state === 'playing') {
-        bird.vy = FLAP_POWER;
-        spawnParticles(bird.x, bird.y, '#fff', 5);
-    }
+function startGame() {
+    snake   = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+    dir     = { x: 1, y: 0 };
+    nextDir = { x: 1, y: 0 };
+    score   = 0;
+    speed   = 130;
+    scoreEl.textContent = 0;
+    overlay.style.display = 'none';
+    placeFood();
+    running = true;
+    clearInterval(interval);
+    interval = setInterval(tick, speed);
 }
 
-document.addEventListener('touchstart', e => { e.preventDefault(); flap(); }, { passive: false });
-document.addEventListener('mousedown', flap);
-document.addEventListener('keydown', e => { if (e.code === 'Space' || e.code === 'ArrowUp') flap(); });
-
-function spawnPipe() {
-    const minTop = 60;
-    const maxTop = H - GROUND_H - GAP - 60;
-    const topH   = minTop + Math.random() * (maxTop - minTop);
-    pipes.push({ x: W + 10, topH, scored: false });
+function setSpeed(s) {
+    clearInterval(interval);
+    speed = s;
+    interval = setInterval(tick, speed);
 }
 
-function spawnParticles(x, y, color, n) {
-    for (let i = 0; i < n; i++) {
-        particles.push({
-            x, y,
-            vx: (Math.random() - 0.5) * 4,
-            vy: (Math.random() - 0.5) * 4,
-            alpha: 1,
-            color,
-            r: 3 + Math.random() * 3
-        });
-    }
-}
+function tick() {
+    dir = { ...nextDir };
+    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
 
-function update() {
-    // Particles
-    particles.forEach(p => {
-        p.x += p.vx; p.y += p.vy;
-        p.alpha -= 0.05;
-    });
-    particles = particles.filter(p => p.alpha > 0);
+    // Wall collision
+    if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= COLS) { gameOver(); return; }
+    // Self collision
+    if (snake.some(s => s.x === head.x && s.y === head.y)) { gameOver(); return; }
 
-    if (state !== 'playing') return;
+    snake.unshift(head);
 
-    bird.vy += GRAVITY;
-    bird.y  += bird.vy;
-    bird.angle = Math.min(Math.PI * 0.4, Math.max(-Math.PI * 0.3, bird.vy * 0.055));
-
-    // Spawn pipes
-    pipeTimer++;
-    if (pipeTimer > 105) { spawnPipe(); pipeTimer = 0; }
-
-    pipes.forEach(p => {
-        p.x -= PIPE_SPEED;
-        if (!p.scored && p.x + PIPE_W < bird.x) {
-            p.scored = true;
-            score++;
-            if (score > best) best = score;
-            spawnParticles(bird.x, bird.y, '#FFD700', 8);
-        }
-    });
-    pipes = pipes.filter(p => p.x + PIPE_W > 0);
-
-    // Boundaries
-    if (bird.y + BIRD_R > H - GROUND_H || bird.y - BIRD_R < 0) {
-        die();
-        return;
+    if (head.x === food.x && head.y === food.y) {
+        score++;
+        scoreEl.textContent = score;
+        if (score > best) { best = score; bestEl.textContent = best; }
+        placeFood();
+        // Speed up every 5 points
+        if (score % 5 === 0 && speed > 60) setSpeed(speed - 8);
+    } else {
+        snake.pop();
     }
 
-    // Pipe collision
-    for (const p of pipes) {
-        if (bird.x + BIRD_R - 4 > p.x && bird.x - BIRD_R + 4 < p.x + PIPE_W) {
-            if (bird.y - BIRD_R < p.topH || bird.y + BIRD_R > p.topH + GAP) {
-                die();
-                return;
-            }
-        }
-    }
+    draw();
 }
 
-function die() {
-    spawnParticles(bird.x, bird.y, '#FF4444', 20);
-    state = 'dead';
+function gameOver() {
+    clearInterval(interval);
+    running = false;
+    overlay.innerHTML = `
+        <h1>Игра окончена!</h1>
+        <div class="score-display">${score}</div>
+        <div class="best-display">Рекорд: ${best}</div>
+        <button id="btn" onclick="startGame()">Играть снова</button>
+    `;
+    overlay.style.display = 'flex';
 }
 
-/* ── Draw helpers ── */
+/* ── Drawing ── */
 
-function drawCloud(x, y, s) {
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+function drawRoundRect(x, y, w, h, r) {
     ctx.beginPath();
-    ctx.arc(x,        y,      s * 0.9, 0, Math.PI * 2);
-    ctx.arc(x + s,    y - s * 0.3, s * 0.75, 0, Math.PI * 2);
-    ctx.arc(x + s * 2, y,    s * 0.9, 0, Math.PI * 2);
+    ctx.roundRect(x, y, w, h, r);
     ctx.fill();
 }
 
-function drawPipe(x, topH) {
-    const capH = 28, capExtra = 8;
-
-    // Top pipe body
-    const g1 = ctx.createLinearGradient(x, 0, x + PIPE_W, 0);
-    g1.addColorStop(0,   '#3ecf5b');
-    g1.addColorStop(0.45,'#2ecc71');
-    g1.addColorStop(1,   '#1a7a40');
-    ctx.fillStyle = g1;
-    ctx.fillRect(x, 0, PIPE_W, topH - capH);
-
-    // Top pipe cap
-    const g2 = ctx.createLinearGradient(x - capExtra, 0, x + PIPE_W + capExtra, 0);
-    g2.addColorStop(0,   '#4ade80');
-    g2.addColorStop(0.5, '#22c55e');
-    g2.addColorStop(1,   '#15803d');
-    ctx.fillStyle = g2;
-    ctx.beginPath();
-    ctx.roundRect(x - capExtra, topH - capH, PIPE_W + capExtra * 2, capH, [0, 0, 4, 4]);
-    ctx.fill();
-
-    const botY = topH + GAP;
-
-    // Bottom cap
-    ctx.fillStyle = g2;
-    ctx.beginPath();
-    ctx.roundRect(x - capExtra, botY, PIPE_W + capExtra * 2, capH, [4, 4, 0, 0]);
-    ctx.fill();
-
-    // Bottom body
-    ctx.fillStyle = g1;
-    ctx.fillRect(x, botY + capH, PIPE_W, H - botY - capH);
-}
-
-function drawBird() {
-    ctx.save();
-    ctx.translate(bird.x, bird.y);
-    ctx.rotate(bird.angle);
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-    ctx.beginPath();
-    ctx.ellipse(3, BIRD_R + 4, BIRD_R * 0.9, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Body
-    const bg = ctx.createRadialGradient(-4, -4, 2, 0, 0, BIRD_R);
-    bg.addColorStop(0, '#FFE55C');
-    bg.addColorStop(1, '#FF9A00');
-    ctx.fillStyle = bg;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, BIRD_R, BIRD_R * 0.85, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Wing
-    ctx.fillStyle = '#FFA500';
-    ctx.beginPath();
-    ctx.ellipse(-4, 5, 11, 6, -0.4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Eye white
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(8, -5, 7, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Pupil
-    ctx.fillStyle = '#222';
-    ctx.beginPath();
-    ctx.arc(10, -5, 3.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Shine
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(9, -7, 1.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Beak
-    ctx.fillStyle = '#FF5500';
-    ctx.beginPath();
-    ctx.moveTo(BIRD_R - 2, -3);
-    ctx.lineTo(BIRD_R + 11, 0);
-    ctx.lineTo(BIRD_R - 2,  4);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.restore();
-}
-
-function drawGround() {
-    // Dirt
-    ctx.fillStyle = '#A0622A';
-    ctx.fillRect(0, H - GROUND_H, W, GROUND_H);
-    // Grass
-    ctx.fillStyle = '#5DBB1F';
-    ctx.fillRect(0, H - GROUND_H, W, 18);
-    // Grass bumps
-    ctx.fillStyle = '#4CAA10';
-    for (let x = 0; x < W; x += 22) {
-        ctx.beginPath();
-        ctx.arc(x + 11, H - GROUND_H + 4, 9, Math.PI, 0);
-        ctx.fill();
-    }
-}
-
-function drawText(text, x, y, size, color = '#fff', stroke = true) {
-    ctx.font = `bold ${size}px Arial`;
-    ctx.textAlign = 'center';
-    if (stroke) {
-        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-        ctx.lineWidth = size * 0.18;
-        ctx.strokeText(text, x, y);
-    }
-    ctx.fillStyle = color;
-    ctx.fillText(text, x, y);
-}
+let foodPulse = 0;
 
 function draw() {
-    // Sky
-    const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0,   '#4FC3F7');
-    sky.addColorStop(0.6, '#B3E5FC');
-    sky.addColorStop(1,   '#E1F5FE');
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, W, H);
+    // Background
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, W, W);
 
-    // Clouds
-    drawCloud(30,  80,  22);
-    drawCloud(180, 55,  18);
-    drawCloud(310, 100, 25);
-
-    // Pipes
-    pipes.forEach(p => drawPipe(p.x, p.topH));
-
-    // Particles
-    particles.forEach(p => {
-        ctx.globalAlpha = p.alpha;
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fill();
-    });
-    ctx.globalAlpha = 1;
-
-    drawGround();
-    drawBird();
-
-    // Score during play
-    if (state === 'playing') {
-        drawText(score, W / 2, 75, W * 0.13);
+    // Grid
+    ctx.strokeStyle = COLORS.grid;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= COLS; i++) {
+        ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, W); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(W, i * CELL); ctx.stroke();
     }
 
-    // ── Start screen ──
-    if (state === 'start') {
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.fillRect(0, 0, W, H);
+    // Food glow
+    foodPulse += 0.12;
+    const glow = 8 + Math.sin(foodPulse) * 4;
+    ctx.shadowColor = COLORS.food;
+    ctx.shadowBlur  = glow;
+    ctx.fillStyle   = COLORS.food;
+    const fx = food.x * CELL + CELL / 2;
+    const fy = food.y * CELL + CELL / 2;
+    ctx.beginPath();
+    ctx.arc(fx, fy, CELL * 0.38, 0, Math.PI * 2);
+    ctx.fill();
+    // Apple stem
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#ff8a65';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(fx, fy - CELL * 0.38);
+    ctx.lineTo(fx + 3, fy - CELL * 0.5);
+    ctx.stroke();
 
-        ctx.fillStyle = 'rgba(255,255,255,0.15)';
-        ctx.beginPath();
-        ctx.roundRect(W / 2 - 155, H / 2 - 120, 310, 240, 20);
-        ctx.fill();
+    ctx.shadowBlur = 0;
 
-        drawText('🐦 Летящая птица', W / 2, H / 2 - 60, W * 0.08);
-        drawText('Тапни чтобы начать', W / 2, H / 2,      W * 0.055, '#FFE082');
-        drawText('Тап = прыжок',        W / 2, H / 2 + 50, W * 0.048);
-        drawText('Лучший: ' + best,      W / 2, H / 2 + 95, W * 0.048, '#80DEEA');
-    }
+    // Snake body
+    for (let i = snake.length - 1; i >= 0; i--) {
+        const s  = snake[i];
+        const px = s.x * CELL + 1;
+        const py = s.y * CELL + 1;
+        const sz = CELL - 2;
 
-    // ── Game over screen ──
-    if (state === 'dead') {
-        ctx.fillStyle = 'rgba(0,0,0,0.45)';
-        ctx.fillRect(0, 0, W, H);
+        if (i === 0) {
+            // Head
+            ctx.shadowColor = COLORS.head;
+            ctx.shadowBlur  = 10;
+            ctx.fillStyle   = COLORS.head;
+            drawRoundRect(px, py, sz, sz, 5);
+            ctx.shadowBlur  = 0;
 
-        ctx.fillStyle = 'rgba(255,255,255,0.12)';
-        ctx.beginPath();
-        ctx.roundRect(W / 2 - 155, H / 2 - 130, 310, 260, 20);
-        ctx.fill();
+            // Eyes
+            const ex = dir.x === 1 ? 0.65 : dir.x === -1 ? 0.2 : 0.3;
+            const ey = dir.y === 1 ? 0.65 : dir.y === -1 ? 0.2 : 0.3;
+            const ex2 = dir.x !== 0 ? ex : 0.7;
+            const ey2 = dir.y !== 0 ? ey : 0.3;
 
-        drawText('Игра окончена!', W / 2, H / 2 - 70, W * 0.08,  '#FF8A80');
-        drawText('Счёт: '  + score, W / 2, H / 2 - 15, W * 0.09);
-        drawText('Рекорд: ' + best,  W / 2, H / 2 + 45, W * 0.055, '#FFD54F');
-        drawText('Тапни для рестарта', W / 2, H / 2 + 100, W * 0.05, '#B0BEC5');
+            ctx.fillStyle = COLORS.eye;
+            ctx.beginPath(); ctx.arc(px + sz * ex,  py + sz * ey,  3.5, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(px + sz * ex2, py + sz * ey2, 3.5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = COLORS.pupil;
+            ctx.beginPath(); ctx.arc(px + sz * ex  + dir.x, py + sz * ey  + dir.y, 1.8, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(px + sz * ex2 + dir.x, py + sz * ey2 + dir.y, 1.8, 0, Math.PI * 2); ctx.fill();
+        } else {
+            const t = i / snake.length;
+            const g = Math.round(200 - t * 80);
+            ctx.fillStyle = `rgb(0, ${g}, ${Math.round(80 + t * 30)})`;
+            drawRoundRect(px + 1, py + 1, sz - 2, sz - 2, 4);
+        }
     }
 }
 
-function loop() {
-    update();
-    draw();
-    requestAnimationFrame(loop);
-}
+/* ── Controls ── */
 
-init();
-loop();
+const KEY_MAP = {
+    ArrowUp:    { x: 0,  y: -1 },
+    ArrowDown:  { x: 0,  y:  1 },
+    ArrowLeft:  { x: -1, y:  0 },
+    ArrowRight: { x: 1,  y:  0 },
+    w: { x: 0, y: -1 }, W: { x: 0, y: -1 },
+    s: { x: 0, y:  1 }, S: { x: 0, y:  1 },
+    a: { x: -1, y: 0 }, A: { x: -1, y: 0 },
+    d: { x: 1,  y: 0 }, D: { x: 1,  y: 0 },
+};
+
+document.addEventListener('keydown', e => {
+    const d = KEY_MAP[e.key];
+    if (d && running && !(d.x === -dir.x && d.y === -dir.y)) {
+        nextDir = d;
+        e.preventDefault();
+    }
+});
+
+let touchStart = null;
+canvas.addEventListener('touchstart', e => {
+    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+
+canvas.addEventListener('touchend', e => {
+    if (!touchStart || !running) return;
+    const dx = e.changedTouches[0].clientX - touchStart.x;
+    const dy = e.changedTouches[0].clientY - touchStart.y;
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+    let d;
+    if (Math.abs(dx) > Math.abs(dy)) {
+        d = dx > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 };
+    } else {
+        d = dy > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 };
+    }
+    if (!(d.x === -dir.x && d.y === -dir.y)) nextDir = d;
+    touchStart = null;
+}, { passive: true });
+
+// Initial draw
+draw();
 </script>
 </body>
 </html>
